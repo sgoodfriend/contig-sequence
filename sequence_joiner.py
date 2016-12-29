@@ -2,11 +2,13 @@
 
 import argparse
 from collections import defaultdict
+import sys
 
 from Bio import SeqIO
 
 """
-sequence_joiner outputs the reconstructed sequence of DNA fragments.
+sequence_joiner outputs the reconstructed sequence of DNA fragments. If no sequence was found,
+outputs nothing and returns error code -1.
 """
 __author__ = 'goodfriend-scott'
 
@@ -174,14 +176,79 @@ class SeqPrefixHashMap(object):
         return node_to_edges
 
 
+class SingleSequenceAssertionFailure(Exception):
+    pass
+
+
+class SeqPath(object):
+    def __init__(self):
+        self.path = []
+
+    def __len__(self):
+        return len(self.path)
+
+
+class SeqJoinLongestPath(object):
+    def __init__(self, seq_graph):
+        self.graph = seq_graph
+        self.root_nodes = self.graph.root_nodes()
+        self.end_nodes = self.graph.end_nodes()
+        if self.__is_linear_graph():
+            self.longest_path = self.__linear_longest_path()
+        else:
+            self.longest_path = self.__dfs_longest_path()
+
+    def __is_linear_graph(self):
+        if len(self.root_nodes) != 1 or len(self.end_nodes) != 1:
+            return False
+        num_degree_one_nodes = sum([len(edges) == 1
+                                    for n, edges in self.graph.node_to_edges.iteritems()])
+        return num_degree_one_nodes == len(self.graph.nodes) - 1
+
+    def __linear_longest_path(self):
+        path = []
+        node = self.root_nodes[0]
+        while len(self.graph.node_to_edges[node]):
+            edge = self.graph.node_to_edges[node][0]
+            path.append(edge)
+            node = edge.destination
+        return path
+
+    def __dfs_longest_path(self):
+        start_candidates = [self.root_nodes[0] if len(self.root_nodes) == 1 else self.graph.nodes]
+        end_candidates = [self.end_nodes[0] if len(self.end_nodes) == 1 else self.end_nodes]
+        longest_path = SeqPath()
+        for s_node in start_candidates:
+            for e_node in end_candidates:
+                self.__dfs(s_node, e_node, longest_path)
+        return longest_path.path
+
+    def __dfs(self, s_node, e_node, longest_path, current_path=None, visiting_set=None):
+        if current_path is None:
+            current_path = []
+        if visiting_set is None:
+            visiting_set = set()
+        if s_node == e_node:
+            if len(current_path) > len(longest_path):
+                longest_path.path = current_path[:]
+            return
+        visiting_set.add(s_node)
+        for edge in self.graph.node_to_edges[s_node]:
+            if edge.destination not in visiting_set:
+                current_path.append(edge)
+                self.__dfs(edge.destination, e_node, longest_path, current_path, visiting_set)
+                current_path.pop()
+        visiting_set.remove(s_node)
+
+
 class SeqJoinGraph(object):
     """
-    SeqJoinGraph outputs the reconstructed sequence by finding the maximum path of SeqJoinEdges.
+    SeqJoinGraph outputs the reconstructed sequence by finding the longest path of SeqJoinEdges.
 
     SeqJoinGraph's nodes are SeqNodes, which represent SeqRecords with precomputed hashing data.
     The edges are SeqJoinEdges, which represent a possible way to combine the source and
     destination sequences and the index at where the overlap begins. SeqJoinGraph's primary method
-    sequence() finds the non-branching maximum path of edges that traverses all nodes and then
+    sequence() finds the non-branching longest path of edges that traverses all nodes and then
     uses the edges to output the reconstructed sequence as a string.
     """
     def __init__(self, nodes, node_to_edges):
@@ -214,38 +281,32 @@ class SeqJoinGraph(object):
             ))
         return '\n'.join(lines)
 
-    def root_node(self):
+    def root_nodes(self):
         """
-        Returns the node that is not a destination of any edge, if it is the only one.
+        Returns the nodes that are not a destination of any edge.
 
-        :return: SeqNode that is not a destination of any edge, if only one. Otherwise, returns
-            None.
+        :return: List of SeqNodes that are not a destination of any edge.
         ..complexity:: Time O(N) where N is the number of SeqNodes.
         """
         unvisitable_nodes = set(self.nodes)
         for n, edges in self.node_to_edges.iteritems():
             for e in edges:
                 unvisitable_nodes.remove(e.destination)
-        if len(unvisitable_nodes) == 1:
-            return unvisitable_nodes.pop()
-        else:
-            return None
+        return list(unvisitable_nodes)
 
-    def end_node(self):
+    def end_nodes(self):
         """
-        Returns the first node that has no outgoing edges.
+        Returns nodes with no outgoing edges.
 
-        :return: First SeqNode with no outgoing edges.
+        :return: List of SeqNodes with no outgoing edges.
         .. complexity:: Time O(N) where N is the number of SeqNodes.
         """
-        for n, edges in self.node_to_edges.iteritems():
-            if len(edges) == 0:
-                return n
-        return None
+        nodes = [n for n in self.nodes if len(self.node_to_edges[n]) == 0]
+        return nodes
 
-    def maximum_path(self):
+    def longest_path(self):
         """
-        Returns the maximum path of edges starting from the root node to the end node.
+        Returns the longest path of edges starting from the root node to the end node.
 
         :return: List of SeqJoinEdges representing a path from the root to the end node, passing
             through every node.
@@ -254,16 +315,8 @@ class SeqJoinGraph(object):
         .. complexity:: Time O(N) where N is the number of SeqNodes thanks to the unbranched
             path assumption.
         """
-        assert (sum([len(edges) == 1 for n, edges in self.node_to_edges.iteritems()]) ==
-                len(self.nodes) - 1), \
-            'maximum_path only supports unbranched graphs.'
-        path = []
-        node = self.root_node()
-        while len(self.node_to_edges[node]):
-            edge = self.node_to_edges[node][0]
-            path.append(edge)
-            node = edge.destination
-        return path
+        solver = SeqJoinLongestPath(self)
+        return solver.longest_path
 
     def sequence(self):
         """
@@ -272,29 +325,37 @@ class SeqJoinGraph(object):
         :return: String reconstructed sequence.
         .. warning:: Current implementation assumes a single unbranched path exists between root
             and end nodes.
-        .. note:: Iterate through each SeqJoinEdge of the maximum path. At each edge, append the
+        .. note:: Iterate through each SeqJoinEdge of the longest path. At each edge, append the
             non-overlapping sequence from the origin into a list of subsequences that are joined
             together. Since we have not been recording the destination node's sequence, we need
             to cap off the list with the end_node's sequence.
         .. complexity:: Time O(N), where N is the number of SeqNodes.
         """
-        maximum_path = self.maximum_path()
-        seq_list = []
-        for e in maximum_path:
-            seq_list.append(e.source.seq()[:e.source_idx])
-        end_node = self.end_node()
-        seq_list.append(end_node.seq())
-        return ''.join([str(seq) for seq in seq_list])
+        longest_path = self.longest_path()
+        if len(longest_path) != len(self.nodes) - 1:
+            raise SingleSequenceAssertionFailure()
+        if len(longest_path) == 0:
+            return str(self.root_nodes()[0].seq)
+        else:
+            seq_list = []
+            for e in longest_path:
+                seq_list.append(e.source.seq()[:e.source_idx])
+            seq_list.append(longest_path[-1].destination.seq())
+            return ''.join([str(seq) for seq in seq_list])
 
 if __name__ == '__main__':
     # Parse filename argument.
     parser = argparse.ArgumentParser(
-        description='Outputs the reconstructed sequence of DNA fragments.')
+        description='Outputs the reconstructed sequence of DNA fragments. '
+                    'Outputs nothing and returns error code -1 if no single sequence was found.')
     parser.add_argument('filename', help='FASTA filename')
     args = parser.parse_args()
     # Parse SeqRecords from FASTA file.
     seq_records = [s_record for s_record in SeqIO.parse(args.filename, 'fasta')]
     # Generate SeqJoinGraph, which is able to return the reconstructed sequence.
     graph = SeqJoinGraph.graph_from_seq_records(seq_records)
-    rec_seq = graph.sequence()
-    print rec_seq
+    try:
+        rec_seq = graph.sequence()
+        print rec_seq
+    except SingleSequenceAssertionFailure:
+        sys.exit(-1)
