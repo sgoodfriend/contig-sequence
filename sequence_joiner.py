@@ -103,6 +103,15 @@ class SeqJoinEdge(object):
             self.destination
         )
 
+    def __hash__(self):
+        return hash(self.source) ^ hash(self.destination) << 1 ^ self.source_idx
+
+    def __signature(self):
+        return (self.source, self.source_idx, self.destination)
+
+    def __eq__(self, other):
+        return self.__signature() == other.__signature()
+
 
 class SeqPrefixHashMap(object):
     """
@@ -121,7 +130,8 @@ class SeqPrefixHashMap(object):
         .. complexity:: Time: O(N*l)=O(n), Space: O(N*l)=O(n), where N is number of SeqRecords,
             l is the average length of fragments, and n is the input size (N*l, effectively)
         """
-        self.min_join_length = (min([len(s.seq) for s in _seq_records]) + 1) / 2
+        self.min_join_length = (min([len(s.seq) for s in _seq_records]) + 1) / 2 \
+            if _seq_records else 0
         self.length_to_hash_to_seqs_map = defaultdict(self.list_generating_defaultdict)
         self.nodes = []
         for s_rec in _seq_records:
@@ -179,6 +189,11 @@ class SeqPrefixHashMap(object):
 class SingleSequenceAssertionFailure(Exception):
     pass
 
+class LinearSequenceAssertionFailure(Exception):
+    pass
+
+class NoFragmentsException(Exception):
+    pass
 
 class SeqPath(object):
     def __init__(self):
@@ -193,19 +208,19 @@ class SeqJoinLongestPath(object):
         self.graph = seq_graph
         self.root_nodes = self.graph.root_nodes()
         self.end_nodes = self.graph.end_nodes()
-        if self.__is_linear_graph():
-            self.longest_path = self.__linear_longest_path()
+        if self.is_linear_graph():
+            self.longest_path = self.linear_longest_path()
         else:
-            self.longest_path = self.__dfs_longest_path()
+            self.longest_path = self.dfs_longest_path()
 
-    def __is_linear_graph(self):
+    def is_linear_graph(self):
         if len(self.root_nodes) != 1 or len(self.end_nodes) != 1:
             return False
         num_degree_one_nodes = sum([len(edges) == 1
                                     for n, edges in self.graph.node_to_edges.iteritems()])
         return num_degree_one_nodes == len(self.graph.nodes) - 1
 
-    def __linear_longest_path(self):
+    def linear_longest_path(self):
         path = []
         node = self.root_nodes[0]
         while len(self.graph.node_to_edges[node]):
@@ -214,9 +229,9 @@ class SeqJoinLongestPath(object):
             node = edge.destination
         return path
 
-    def __dfs_longest_path(self):
-        start_candidates = [self.root_nodes[0] if len(self.root_nodes) == 1 else self.graph.nodes]
-        end_candidates = [self.end_nodes[0] if len(self.end_nodes) == 1 else self.end_nodes]
+    def dfs_longest_path(self):
+        start_candidates = [self.root_nodes[0]] if len(self.root_nodes) == 1 else self.graph.nodes
+        end_candidates = [self.end_nodes[0]] if len(self.end_nodes) == 1 else self.graph.nodes
         longest_path = SeqPath()
         for s_node in start_candidates:
             for e_node in end_candidates:
@@ -270,6 +285,10 @@ class SeqJoinGraph(object):
         prefix_map = SeqPrefixHashMap(_seq_records)
         return cls(prefix_map.nodes, prefix_map.node_to_edges())
 
+    @classmethod
+    def graph_from_filename(cls, filename):
+        return cls.graph_from_seq_records([s for s in SeqIO.parse(filename, 'fasta')])
+
     def __repr__(self):
         lines = ['{0} nodes, {1} edges'.format(
             len(self.nodes), sum([len(edges) for n, edges in self.node_to_edges.iteritems()])
@@ -291,7 +310,8 @@ class SeqJoinGraph(object):
         unvisitable_nodes = set(self.nodes)
         for n, edges in self.node_to_edges.iteritems():
             for e in edges:
-                unvisitable_nodes.remove(e.destination)
+                if e.destination in unvisitable_nodes:
+                    unvisitable_nodes.remove(e.destination)
         return list(unvisitable_nodes)
 
     def end_nodes(self):
@@ -310,33 +330,42 @@ class SeqJoinGraph(object):
 
         :return: List of SeqJoinEdges representing a path from the root to the end node, passing
             through every node.
-        .. warning:: Current implementation assumes a single unbranched path exists between root
-            and end nodes.
-        .. complexity:: Time O(N) where N is the number of SeqNodes thanks to the unbranched
-            path assumption.
+        .. complexity:: If the graph forms a single, linearly connected structure: O(N).
+            Otherwise, the solver falls back to a dfs longest path solver that accounts for cycles.
+            Worst case for dfs: O(N!) for a complete digraph.
         """
         solver = SeqJoinLongestPath(self)
         return solver.longest_path
+
+    def __assert_linearity(self, longest_path=None):
+        if longest_path:
+            source = longest_path[0].source
+            destination = longest_path[-1].destination
+        else:
+            source = self.nodes[0]
+            destination = self.nodes[0]
+        for edges in self.node_to_edges[destination]:
+            if edges.destination == source:
+                raise LinearSequenceAssertionFailure(self)
 
     def sequence(self):
         """
         Returns the reconstructed sequence.
 
         :return: String reconstructed sequence.
-        .. warning:: Current implementation assumes a single unbranched path exists between root
-            and end nodes.
-        .. note:: Iterate through each SeqJoinEdge of the longest path. At each edge, append the
-            non-overlapping sequence from the origin into a list of subsequences that are joined
-            together. Since we have not been recording the destination node's sequence, we need
-            to cap off the list with the end_node's sequence.
-        .. complexity:: Time O(N), where N is the number of SeqNodes.
+        .. complexity:: Time O(N) for a single, linearly connected structure. O(N!) worst-case
+            for a complete digraph.
         """
+        if len(self.nodes) == 0:
+            raise NoFragmentsException(self)
         longest_path = self.longest_path()
         if len(longest_path) != len(self.nodes) - 1:
-            raise SingleSequenceAssertionFailure()
+            raise SingleSequenceAssertionFailure(self)
         if len(longest_path) == 0:
-            return str(self.root_nodes()[0].seq)
+            self.__assert_linearity()
+            return str(self.nodes[0].seq())
         else:
+            self.__assert_linearity(longest_path)
             seq_list = []
             for e in longest_path:
                 seq_list.append(e.source.seq()[:e.source_idx])
@@ -344,18 +373,20 @@ class SeqJoinGraph(object):
             return ''.join([str(seq) for seq in seq_list])
 
 if __name__ == '__main__':
-    # Parse filename argument.
     parser = argparse.ArgumentParser(
-        description='Outputs the reconstructed sequence of DNA fragments. '
-                    'Outputs nothing and returns error code -1 if no single sequence was found.')
+        description='Outputs the single reconstructed sequence of DNA fragments, otherwise '
+                    'exits with error code and outputs nothing. '
+                    'Error codes: -1 no inputted fragments, -2 could not find a single sequence '
+                    'that accounts for all fragments, -3 sequence is found to be circuluar.')
     parser.add_argument('filename', help='FASTA filename')
     args = parser.parse_args()
-    # Parse SeqRecords from FASTA file.
-    seq_records = [s_record for s_record in SeqIO.parse(args.filename, 'fasta')]
-    # Generate SeqJoinGraph, which is able to return the reconstructed sequence.
-    graph = SeqJoinGraph.graph_from_seq_records(seq_records)
+    graph = SeqJoinGraph.graph_from_filename(args.filename)
     try:
         rec_seq = graph.sequence()
         print rec_seq
-    except SingleSequenceAssertionFailure:
+    except NoFragmentsException:
         sys.exit(-1)
+    except SingleSequenceAssertionFailure:
+        sys.exit(-2)
+    except LinearSequenceAssertionFailure:
+        sys.exit(-3)
