@@ -3,7 +3,7 @@ import unittest
 
 from Bio import SeqIO
 
-import contig_sequence as sj
+import contig_sequence as cs
 
 
 class BaseSeqJoinGraphTestCase(unittest.TestCase):
@@ -13,7 +13,7 @@ class BaseSeqJoinGraphTestCase(unittest.TestCase):
 
     def setUp(self):
         self.seq_records = [s for s in SeqIO.parse(os.path.join(self.DIR, self.FILENAME), 'fasta')]
-        self.graph = sj.SeqJoinGraph.graph_from_seq_records(self.seq_records)
+        self.graph = cs.SeqJoinGraph.graph_from_seq_records(self.seq_records)
 
     def test_correct_sequence(self):
         if self.RECOMBINED_SEQUENCE is not None:
@@ -40,11 +40,11 @@ class BaseLinearFileLoadedTestCase(BaseSeqJoinGraphTestCase):
         self.assertEqual(self.graph.end_nodes()[0].seq_record.name, self.END_NAME)
 
     def test_seq_join_longest_path_linearity(self):
-        longest_path = sj.SeqJoinLongestPath(self.graph)
+        longest_path = cs.SeqJoinLongestPath(self.graph)
         self.assertTrue(longest_path.is_linear_graph())
 
     def test_seq_join_longest_path_equivalence(self):
-        longest_path = sj.SeqJoinLongestPath(self.graph)
+        longest_path = cs.SeqJoinLongestPath(self.graph)
         self.assertEqual(longest_path.linear_longest_path(), longest_path.dfs_longest_path())
 
 
@@ -74,11 +74,11 @@ class CircularDNATestCase(BaseSeqJoinGraphTestCase):
         self.assertEqual(self.graph.end_nodes(), [])
 
     def test_exception_raised(self):
-        with self.assertRaises(sj.LinearSequenceAssertionFailure):
+        with self.assertRaises(cs.LinearSequenceAssertionFailure):
             self.graph.sequence()
 
     def test_seq_join_longest_path(self):
-        longest_path = sj.SeqJoinLongestPath(self.graph)
+        longest_path = cs.SeqJoinLongestPath(self.graph)
         self.assertFalse(longest_path.is_linear_graph())
         self.assertEqual(longest_path.longest_path, longest_path.dfs_longest_path())
 
@@ -87,7 +87,7 @@ class EmptyFastaFileTestCase(BaseSeqJoinGraphTestCase):
     FILENAME = 'empty.fasta'
 
     def test_sequence_exception_raise(self):
-        with self.assertRaises(sj.NoFragmentsException):
+        with self.assertRaises(cs.NoFragmentsException):
             self.graph.sequence()
 
 
@@ -95,8 +95,8 @@ class SmallCyclesDNATestCase(BaseSeqJoinGraphTestCase):
     """
     SmallCyclesDNATestCase tests if the dfs maximum path solver works with small cycles existing.
 
-    Longest path is  1-2-3. However, there are additional possible paths thanks to there being
-    cycle-forming edges: 2->1, 3->2.
+    Longest path is  1-2-3-4. However, there are additional possible paths thanks to there being
+    cycle-forming edges: 2->1, 4->2.
     """
     FILENAME = 'simple_branching_cycle.fasta'
     RECOMBINED_SEQUENCE = 'CGATCGTTAATC'
@@ -106,11 +106,11 @@ class SmallCyclesDNATestCase(BaseSeqJoinGraphTestCase):
         self.assertEqual(len(self.graph.end_nodes()), 0)
 
     def test_maximum_path_non_linearity(self):
-        longest_path = sj.SeqJoinLongestPath(self.graph)
+        longest_path = cs.SeqJoinLongestPath(self.graph)
         self.assertFalse(longest_path.is_linear_graph())
 
     def test_maximum_path_uses_dfs(self):
-        longest_path = sj.SeqJoinLongestPath(self.graph)
+        longest_path = cs.SeqJoinLongestPath(self.graph)
         self.assertEqual(longest_path.longest_path, longest_path.dfs_longest_path())
 
 
@@ -128,15 +128,15 @@ class HalfMatchingEdgeTestCasts(BaseSeqJoinGraphTestCase):
     FILENAME = 'half_matching.fasta'
 
     def test_no_single_component_exception(self):
-        with self.assertRaises(sj.SingleSequenceAssertionFailure):
+        with self.assertRaises(cs.SingleSequenceAssertionFailure):
             self.graph.sequence()
 
     def test_short_matches(self):
-        self.graph = sj.SeqJoinGraph.graph_from_seq_records(self.seq_records[:2])
+        self.graph = cs.SeqJoinGraph.graph_from_seq_records(self.seq_records[:2])
         self.assertEqual(self.graph.sequence(), 'ATCGA')
 
     def test_odd_short_matches(self):
-        self.graph = sj.SeqJoinGraph.graph_from_seq_records(self.seq_records[2:4])
+        self.graph = cs.SeqJoinGraph.graph_from_seq_records(self.seq_records[2:4])
         self.assertEqual(self.graph.sequence(), 'ATCG')
 
     def test_odd_too_short(self):
@@ -145,28 +145,29 @@ class HalfMatchingEdgeTestCasts(BaseSeqJoinGraphTestCase):
           CGA
         Does not match because the overlap is less than half the length of the sequences.
         """
-        self.graph = sj.SeqJoinGraph.graph_from_seq_records(self.seq_records[1:3])
-        with self.assertRaises(sj.SingleSequenceAssertionFailure):
+        self.graph = cs.SeqJoinGraph.graph_from_seq_records(self.seq_records[1:3])
+        with self.assertRaises(cs.SingleSequenceAssertionFailure):
             self.graph.sequence()
 
     def test_one_too_short_odd_length(self):
         """
         ATCGA   OR  GAT
            GAT       ATCGA
-        First sequence too short so doesn't count as match.
+        Long sequence overlap too short, so doesn't count as match.
         """
-        self.graph = sj.SeqJoinGraph.graph_from_seq_records(self.seq_records[4:6])
-        with self.assertRaises(sj.SingleSequenceAssertionFailure):
+        self.graph = cs.SeqJoinGraph.graph_from_seq_records(self.seq_records[4:6])
+        with self.assertRaises(cs.SingleSequenceAssertionFailure):
             self.graph.sequence()
 
     def test_one_too_short_even_length(self):
         """
         CATGAT
             ATCG
+        First sequence overlap too short, so doesn't count as match.
         """
-        self.graph = sj.SeqJoinGraph.graph_from_seq_records(
+        self.graph = cs.SeqJoinGraph.graph_from_seq_records(
             [self.seq_records[0], self.seq_records[6]])
-        with self.assertRaises(sj.SingleSequenceAssertionFailure):
+        with self.assertRaises(cs.SingleSequenceAssertionFailure):
             self.graph.sequence()
 
 if __name__ == '__main__':
