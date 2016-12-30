@@ -218,21 +218,16 @@ class SeqJoinGraph(object):
         solver = SeqJoinLongestPath(self)
         return solver.longest_path
 
-    def __assert_linearity(self, longest_path=None):
+    def __assert_linearity(self, longest_path):
         """
-        Checks to make sure the destination does not have an edge leading to the source. For
-        single node graphs, checks to make sure the node doesn't have an edge that goes to itself.
-        Raises a LinearSequenceAssertionFailure if an edge connects the end to the beginning.
+        Checks to make sure the destination does not have an edge leading to the source. Raises a
+        LinearSequenceAssertionFailure if an edge connects the end to the beginning.
 
         :param longest_path: The longest path of edges existing in the graph.
         :raises: LinearSequenceAssertionFailure if an edge connects the end to the beginning.
         """
-        if longest_path:
-            source = longest_path[0].source
-            destination = longest_path[-1].destination
-        else:
-            source = self.nodes[0]
-            destination = self.nodes[0]
+        source = longest_path[0].source
+        destination = longest_path[-1].destination
         for edges in self.node_to_edges[destination]:
             if edges.destination == source:
                 raise LinearSequenceAssertionFailure(self)
@@ -255,7 +250,6 @@ class SeqJoinGraph(object):
         if len(longest_path) != len(self.nodes) - 1:
             raise SingleSequenceAssertionFailure(self)
         if len(longest_path) == 0:
-            self.__assert_linearity()
             return str(self.nodes[0].seq())
         else:
             self.__assert_linearity(longest_path)

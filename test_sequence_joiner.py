@@ -3,9 +3,11 @@ from Bio import SeqIO
 
 import sequence_joiner as sj
 
+
 class BaseSeqJoinGraphTestCase(unittest.TestCase):
     FILENAME = 'example.fasta'
     RECOMBINED_SEQUENCE = None
+
     def setUp(self):
         self.seq_records = [s for s in SeqIO.parse(self.FILENAME, 'fasta')]
         self.graph = sj.SeqJoinGraph.graph_from_seq_records(self.seq_records)
@@ -16,11 +18,17 @@ class BaseSeqJoinGraphTestCase(unittest.TestCase):
             self.assertEqual(seq, self.RECOMBINED_SEQUENCE)
 
 
+class DuplicateFragmentsTestCase(BaseSeqJoinGraphTestCase):
+    FILENAME = 'duplicate.fasta'
+    RECOMBINED_SEQUENCE = 'ATCA'
+
+
 class BaseLinearFileLoadedTestCase(BaseSeqJoinGraphTestCase):
     FILENAME = 'example.fasta'
     RECOMBINED_SEQUENCE = 'ATTAGACCTGCCGGAATAC'
     ROOT_NAME = 'Frag_56'
     END_NAME = 'Frag_59'
+
     def test_seq_join_graph_state(self):
         self.assertEqual(len(self.graph.nodes), len(self.seq_records))
         self.assertEqual(len(self.graph.root_nodes()), 1)
@@ -36,14 +44,17 @@ class BaseLinearFileLoadedTestCase(BaseSeqJoinGraphTestCase):
         longest_path = sj.SeqJoinLongestPath(self.graph)
         self.assertEqual(longest_path.linear_longest_path(), longest_path.dfs_longest_path())
 
+
 class ChallengeDataSetTestCase(BaseLinearFileLoadedTestCase):
     FILENAME = 'coding_challenge_data_set.txt'
     ROOT_NAME = 'Rosalind_0505'
     END_NAME = 'Rosalind_9985'
+
     def setUp(self):
         super(self.__class__, self).setUp()
         with open('contig_coding_challenge_data_set.txt', 'r') as f:
             self.RECOMBINED_SEQUENCE = f.read()
+
 
 class SingleFragmentLinearTestCase(BaseLinearFileLoadedTestCase):
     FILENAME = 'single.fasta'
@@ -54,6 +65,7 @@ class SingleFragmentLinearTestCase(BaseLinearFileLoadedTestCase):
 
 class CircularDNATestCase(BaseSeqJoinGraphTestCase):
     FILENAME = 'circular.fasta'
+
     def test_seq_join_graph_state(self):
         self.assertEqual(self.graph.root_nodes(), [])
         self.assertEqual(self.graph.end_nodes(), [])
@@ -68,12 +80,9 @@ class CircularDNATestCase(BaseSeqJoinGraphTestCase):
         self.assertEqual(longest_path.longest_path, longest_path.dfs_longest_path())
 
 
-class SingleFragmentCircularDNATestCase(CircularDNATestCase):
-    FILENAME = 'single_circular.fasta'
-
-
 class EmptyFastaFileTestCase(BaseSeqJoinGraphTestCase):
     FILENAME = 'empty.fasta'
+
     def test_sequence_exception_raise(self):
         with self.assertRaises(sj.NoFragmentsException):
             self.graph.sequence()
@@ -87,7 +96,8 @@ class SmallCyclesDNATestCase(BaseSeqJoinGraphTestCase):
     cycle-forming edges: 2->1, 3->2.
     """
     FILENAME = 'simple_branching_cycle.fasta'
-    RECOMBINED_SEQUENCE = 'ATCGAATCGA'
+    RECOMBINED_SEQUENCE = 'CGATCGTTAATC'
+
     def test_terminal_nodes(self):
         self.assertEqual(len(self.graph.root_nodes()), 0)
         self.assertEqual(len(self.graph.end_nodes()), 0)
@@ -109,6 +119,52 @@ class SkipFragmentsDNATestCase(BaseSeqJoinGraphTestCase):
     """
     FILENAME = 'simple_branching_skip.fasta'
     RECOMBINED_SEQUENCE = 'AAAAGTAGTGA'
+
+
+class HalfMatchingEdgeTestCasts(BaseSeqJoinGraphTestCase):
+    FILENAME = 'half_matching.fasta'
+
+    def test_no_single_component_exception(self):
+        with self.assertRaises(sj.SingleSequenceAssertionFailure):
+            self.graph.sequence()
+
+    def test_short_matches(self):
+        self.graph = sj.SeqJoinGraph.graph_from_seq_records(self.seq_records[:2])
+        self.assertEqual(self.graph.sequence(), 'ATCGA')
+
+    def test_odd_short_matches(self):
+        self.graph = sj.SeqJoinGraph.graph_from_seq_records(self.seq_records[2:4])
+        self.assertEqual(self.graph.sequence(), 'ATCG')
+
+    def test_odd_too_short(self):
+        """
+        ATC
+          CGA
+        Does not match because the overlap is less than half the length of the sequences.
+        """
+        self.graph = sj.SeqJoinGraph.graph_from_seq_records(self.seq_records[1:3])
+        with self.assertRaises(sj.SingleSequenceAssertionFailure):
+            self.graph.sequence()
+
+    def test_one_too_short_odd_length(self):
+        """
+        ATCGA   OR  GAT
+           GAT       ATCGA
+        First sequence too short so doesn't count as match.
+        """
+        self.graph = sj.SeqJoinGraph.graph_from_seq_records(self.seq_records[4:6])
+        with self.assertRaises(sj.SingleSequenceAssertionFailure):
+            self.graph.sequence()
+
+    def test_one_too_short_even_length(self):
+        """
+        CATGAT
+            ATCG
+        """
+        self.graph = sj.SeqJoinGraph.graph_from_seq_records(
+            [self.seq_records[0], self.seq_records[6]])
+        with self.assertRaises(sj.SingleSequenceAssertionFailure):
+            self.graph.sequence()
 
 if __name__ == '__main__':
     unittest.main()

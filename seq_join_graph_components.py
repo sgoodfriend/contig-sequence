@@ -123,16 +123,15 @@ class SeqPrefixHashMap(object):
         .. complexity:: Time: O(N*l)=O(n), Space: O(N*l)=O(n), where N is number of SeqRecords,
             l is the average length of fragments, and n is the input size (N*l, effectively)
         """
-        self.min_join_length = (min([len(s.seq) for s in _seq_records]) + 1) / 2 \
-            if _seq_records else 0
         self.length_to_hash_to_seqs_map = defaultdict(self.list_generating_defaultdict)
         self.nodes = []
         for s_rec in _seq_records:
             node = SeqNode(s_rec)
             _seq = s_rec.seq
-            h = node.seq_hash(length=self.min_join_length)
-            self.length_to_hash_to_seqs_map[self.min_join_length][h].append(node)
-            for l in xrange(self.min_join_length + 1, len(_seq)):
+            min_join_length = (len(_seq) + 1) / 2
+            h = node.seq_hash(length=min_join_length)
+            self.length_to_hash_to_seqs_map[min_join_length][h].append(node)
+            for l in xrange(min_join_length + 1, len(_seq) + 1):
                 h = (h * SeqHash.R + ord(_seq[l - 1])) % SeqHash.Q
                 self.length_to_hash_to_seqs_map[l][h].append(node)
             node.h = h
@@ -150,6 +149,7 @@ class SeqPrefixHashMap(object):
         min_join_length to length and see if there are candidate SeqNodes with matching prefix
         length and hash in the map. For each candidate explicitly check to make sure the suffix
         matches the candidate's prefix character by character (Las Vegas variant of Rabin-Karp).
+        A fragment joining with itself is explicitly not allowed.
 
         :return: Dictionary of nodes to SeqJoinEdges.
         .. complexity:: Typical Time: O(N*l)=O(n), Space: O(N*l)=O(n), where N is number of
@@ -159,16 +159,19 @@ class SeqPrefixHashMap(object):
             collide during building of SeqPrefixHashMap. The additional N term comes from having
             to check each sequence, the additional l term comes from the character by character
             check.
+        .. note:: Self joining is explicitly not allowed.
         """
         node_to_edges = defaultdict(list)
         for n in self.nodes:
             seq = n.seq_record.seq
-            idx = self.min_join_length
+            idx = len(seq) - (len(seq) + 1) / 2
             h = n.seq_hash(idx)
             while True:
                 length = len(seq) - idx
                 if h in self.length_to_hash_to_seqs_map[length]:
                     for candidate_node in self.length_to_hash_to_seqs_map[length][h]:
+                        if candidate_node == n:
+                            continue
                         if seq[idx:] == candidate_node.seq()[:length]:
                             node_to_edges[n].append(SeqJoinEdge(n, idx, candidate_node))
                 idx -= 1

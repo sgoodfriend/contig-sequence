@@ -1,6 +1,8 @@
 >1
-ATCGA
+CGAT
 >2 (suffix matches 1 or 3)
-CGAATC
->3 (suffix matches 2)
-AATCGA
+ATCG
+>3
+TCGTTA
+>4 (suffix matches 2)
+TTAATC
