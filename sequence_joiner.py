@@ -2,8 +2,11 @@
 
 import argparse
 import sys
-
-from Bio import SeqIO
+try:
+    from Bio import SeqIO
+except ImportError:
+    print 'Biopython must be installed. If you have pip, run "pip install biopython"'
+    sys.exit(1)
 
 from seq_join_graph_components import SeqPrefixHashMap
 

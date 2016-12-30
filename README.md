@@ -40,7 +40,16 @@ GCCGGAATAC
 ATTAGACCTGCCGGAATAC
 
 # Usage
-To run the contig generator, you can either run sequence_joiner.py with
+## Dependencies
+sequence_joiner.py requires Biopython, a collection of Python tools for
+computational biology. Biopython is used to parse the FASTA files into
+individual sequences. To install Biopython with pip:
+```
+$ sudo pip install biopython
+```
+
+## sequence_joiner Usage
+To find the contig sequence, you can either run sequence_joiner.py with
 or without invoking python:
 ```
 $ python sequence_joiner.py example.fasta
