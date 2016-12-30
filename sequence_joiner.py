@@ -186,16 +186,11 @@ class SeqPrefixHashMap(object):
         return node_to_edges
 
 
-class SingleSequenceAssertionFailure(Exception):
-    pass
-
-class LinearSequenceAssertionFailure(Exception):
-    pass
-
-class NoFragmentsException(Exception):
-    pass
-
 class SeqPath(object):
+    """
+    SeqPath is a path container useful when you want to be able to update the path during a
+    recursive call.
+    """
     def __init__(self):
         self.path = []
 
@@ -204,6 +199,16 @@ class SeqPath(object):
 
 
 class SeqJoinLongestPath(object):
+    """
+    SeqJoinLongestPath finds the longest path of edges in a given SeqJoinGraph.
+
+    SeqJoinLongestPath finds the longest path with two different algorithms with vastly different
+    performance guarantees. If the graph is a single-component linear path, then we can traverse
+    the nodes from the root to the end in O(N) time. If there is branching, then we fall back
+    to a depth first search longest path algorithm that can handle cycles. The worst case runtime
+    for this algorithm is O(N!L!) if every node is connected to every other node for every possible
+    length (think all fragments are just A's).
+    """
     def __init__(self, seq_graph):
         self.graph = seq_graph
         self.root_nodes = self.graph.root_nodes()
@@ -214,6 +219,12 @@ class SeqJoinLongestPath(object):
             self.longest_path = self.dfs_longest_path()
 
     def is_linear_graph(self):
+        """
+        Returns if the graph is a linear single-component graph.
+
+        :return: Boolean of if the graph is a linear single component graph.
+        .. complexity:: O(N) time.
+        """
         if len(self.root_nodes) != 1 or len(self.end_nodes) != 1:
             return False
         num_degree_one_nodes = sum([len(edges) == 1
@@ -221,6 +232,11 @@ class SeqJoinLongestPath(object):
         return num_degree_one_nodes == len(self.graph.nodes) - 1
 
     def linear_longest_path(self):
+        """
+        Computes the longest path of edges assuming a linear single-component graph.
+        :return: List representing the longest path of edges in the graph.
+        .. complexity:: O(N) time.
+        """
         path = []
         node = self.root_nodes[0]
         while len(self.graph.node_to_edges[node]):
@@ -230,6 +246,19 @@ class SeqJoinLongestPath(object):
         return path
 
     def dfs_longest_path(self):
+        """
+        Computes the longest path of edges using the general longest path solving algorithm.
+        :return: List representing the longest path of edges in the graph.
+        .. complexity:: Worst-case O(N!L!) given a graph where every possible length of node
+            overlap connects to every other node. Typical performance is likely closer to O(N) if
+            you assume that branching occurs sparsely. Performance has an added N multiplier for
+            each inability to determine start and end node (O(N^3) if you cannot determine either
+            start or end node before starting).
+        .. warning:: Uses recursion where depth of the stack can get up to the number of nodes.
+            The default sys.recursionlimit is likely 1000, so if you are going above this number
+            of fragments, you'll should increase the recursionlimit with sys.setrecursionlimit.
+        .. todo:: Switch recursion to iterative solution to support graphs above size ~1000.
+        """
         start_candidates = [self.root_nodes[0]] if len(self.root_nodes) == 1 else self.graph.nodes
         end_candidates = [self.end_nodes[0]] if len(self.end_nodes) == 1 else self.graph.nodes
         longest_path = SeqPath()
@@ -254,6 +283,29 @@ class SeqJoinLongestPath(object):
                 self.__dfs(edge.destination, e_node, longest_path, current_path, visiting_set)
                 current_path.pop()
         visiting_set.remove(s_node)
+
+
+class NoFragmentsException(Exception):
+    """
+    Exception raised when graph has no nodes (no SeqRecords inputted) when non-zero nodes is
+    assumed.
+    """
+    pass
+
+
+class SingleSequenceAssertionFailure(Exception):
+    """
+    Exception raised if graph doesn't form a singly connected structure.
+    """
+    pass
+
+
+class LinearSequenceAssertionFailure(Exception):
+    """
+    Exception raised if the singly connected structure path would form a cycle because the last
+    node can join with the first node.
+    """
+    pass
 
 
 class SeqJoinGraph(object):
@@ -324,7 +376,7 @@ class SeqJoinGraph(object):
         nodes = [n for n in self.nodes if len(self.node_to_edges[n]) == 0]
         return nodes
 
-    def longest_path(self):
+    def __longest_path(self):
         """
         Returns the longest path of edges starting from the root node to the end node.
 
@@ -332,12 +384,21 @@ class SeqJoinGraph(object):
             through every node.
         .. complexity:: If the graph forms a single, linearly connected structure: O(N).
             Otherwise, the solver falls back to a dfs longest path solver that accounts for cycles.
-            Worst case for dfs: O(N!) for a complete digraph.
+            Worst case for dfs: O(N!L!) for a complete digraph where every possible length can
+            also matches (think of fragments of all A's).
         """
         solver = SeqJoinLongestPath(self)
         return solver.longest_path
 
     def __assert_linearity(self, longest_path=None):
+        """
+        Checks to make sure the destination does not have an edge leading to the source. For
+        single node graphs, checks to make sure the node doesn't have an edge that goes to itself.
+        Raises a LinearSequenceAssertionFailure if an edge connects the end to the beginning.
+
+        :param longest_path: The longest path of edges existing in the graph.
+        :raises: LinearSequenceAssertionFailure if an edge connects the end to the beginning.
+        """
         if longest_path:
             source = longest_path[0].source
             destination = longest_path[-1].destination
@@ -353,12 +414,16 @@ class SeqJoinGraph(object):
         Returns the reconstructed sequence.
 
         :return: String reconstructed sequence.
+        :raises: NoFragmentsException if graph has no nodes (no SeqRecords inputted).
+            SingleSequenceAssertionFailure if graph doesn't form a singly connected structure.
+            LinearSequenceAssertionFailure if the singly connected structure path would form a
+            cycle because the last node can join with the first node.
         .. complexity:: Time O(N) for a single, linearly connected structure. O(N!) worst-case
             for a complete digraph.
         """
         if len(self.nodes) == 0:
             raise NoFragmentsException(self)
-        longest_path = self.longest_path()
+        longest_path = self.__longest_path()
         if len(longest_path) != len(self.nodes) - 1:
             raise SingleSequenceAssertionFailure(self)
         if len(longest_path) == 0:
