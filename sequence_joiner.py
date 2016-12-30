@@ -34,8 +34,9 @@ class SeqJoinLongestPath(object):
     performance guarantees. If the graph is a single-component linear path, then we can traverse
     the nodes from the root to the end in O(N) time. If there is branching, then we fall back
     to a depth first search longest path algorithm that can handle cycles. The worst case runtime
-    for this algorithm is O(N!L!) if every node is connected to every other node for every possible
-    length (think all fragments are just A's).
+    for this algorithm is O(2^E) if every node is connected to every other node for every possible
+    length (think all fragments are just A's). E is the number of edges, which is N*L in the
+    worst possible case.
     """
     def __init__(self, seq_graph):
         self.graph = seq_graph
@@ -77,7 +78,7 @@ class SeqJoinLongestPath(object):
         """
         Computes the longest path of edges using the general longest path solving algorithm.
         :return: List representing the longest path of edges in the graph.
-        .. complexity:: Worst-case O(N!L!) given a graph where every possible length of node
+        .. complexity:: Worst-case O(2^E) given a graph where every possible length of node
             overlap connects to every other node. Typical performance is likely closer to O(N) if
             you assume that branching occurs sparsely. Performance has an added N multiplier for
             each inability to determine start and end node (O(N^3) if you cannot determine either
@@ -212,8 +213,9 @@ class SeqJoinGraph(object):
             through every node.
         .. complexity:: If the graph forms a single, linearly connected structure: O(N).
             Otherwise, the solver falls back to a dfs longest path solver that accounts for cycles.
-            Worst case for dfs: O(N!L!) for a complete digraph where every possible length can
-            also matches (think of fragments of all A's).
+            Worst case for dfs: O(2^E), where E is the number of edges. In the worst-case the
+            number of edges is N*L if every possible length also matches (think of fragments of
+            all A's).
         """
         solver = SeqJoinLongestPath(self)
         return solver.longest_path
@@ -241,8 +243,9 @@ class SeqJoinGraph(object):
             SingleSequenceAssertionFailure if graph doesn't form a singly connected structure.
             LinearSequenceAssertionFailure if the singly connected structure path would form a
             cycle because the last node can join with the first node.
-        .. complexity:: Time O(N) for a single, linearly connected structure. O(N!) worst-case
-            for a complete digraph.
+        .. complexity:: Time O(N) for a single, linearly connected structure. Worst-case: O(2^E),
+            where E can be N*L if every possible suffix length matches every node (think of
+            fragments of all A's).
         """
         if len(self.nodes) == 0:
             raise NoFragmentsException(self)
