@@ -270,7 +270,7 @@ if __name__ == '__main__':
         description='Outputs the single reconstructed sequence of DNA fragments, otherwise '
                     'exits with error code and outputs nothing. '
                     'Error codes: -1 no inputted fragments, -2 could not find a single sequence '
-                    'that accounts for all fragments, -3 sequence is found to be circuluar.')
+                    'that accounts for all fragments, -3 sequence is found to be circular.')
     parser.add_argument('filename', help='FASTA filename')
     args = parser.parse_args()
     graph = SeqJoinGraph.graph_from_filename(args.filename)
