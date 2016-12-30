@@ -1,15 +1,18 @@
+import os
 import unittest
+
 from Bio import SeqIO
 
 import sequence_joiner as sj
 
 
 class BaseSeqJoinGraphTestCase(unittest.TestCase):
+    DIR = 'test_seqs'
     FILENAME = 'example.fasta'
     RECOMBINED_SEQUENCE = None
 
     def setUp(self):
-        self.seq_records = [s for s in SeqIO.parse(self.FILENAME, 'fasta')]
+        self.seq_records = [s for s in SeqIO.parse(os.path.join(self.DIR, self.FILENAME), 'fasta')]
         self.graph = sj.SeqJoinGraph.graph_from_seq_records(self.seq_records)
 
     def test_correct_sequence(self):
@@ -52,7 +55,7 @@ class ChallengeDataSetTestCase(BaseLinearFileLoadedTestCase):
 
     def setUp(self):
         super(self.__class__, self).setUp()
-        with open('contig_coding_challenge_data_set.txt', 'r') as f:
+        with open(os.path.join(self.DIR, 'contig_coding_challenge_data_set.txt'), 'r') as f:
             self.RECOMBINED_SEQUENCE = f.read()
 
 
