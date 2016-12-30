@@ -1,7 +1,7 @@
 from collections import defaultdict
 
 """
-seq_join_graph_components contains helper implementations for SeqJoinGraph creations.
+seq_join_graph_components contains helper implementations for SeqJoinGraph in contig_sequence.py.
 """
 __author__ = 'goodfriend-scott'
 
@@ -13,7 +13,7 @@ class SeqHash(object):
     """
     Q = 36028797018963913  # Next prime below 2^55.
     R = 128  # Size of alphabet
-    RQ = [1]
+    RQ = [1]  # Q*R^i mod Q: Used to calculate hash added by letters added to beginning of string.
 
     @classmethod
     def rq_for_length(cls, length):
@@ -33,14 +33,14 @@ class SeqNode(object):
     """
     Graph node representing a SeqRecord.
 
-    .. warnings:: Hash h must be set before you can use __hash_ or __eq__.
+    .. warnings:: Hash h must be set before you can use __hash__ or __eq__.
     """
 
     def __init__(self, seq_record):
         self.seq_record = seq_record
         self.h = None
 
-    def seq(self):
+    def get_seq(self):
         """
         Helper function that returns the seq_record's Seq object.
 
@@ -57,12 +57,12 @@ class SeqNode(object):
             from idx.
         :return: The int hash of the subsequence.
         """
-        _seq = self.seq()
+        seq = self.get_seq()
         if length is None:
-            length = len(_seq) - idx
+            length = len(seq) - idx
         h = 0
         for i in xrange(idx, idx + length):
-            h = (h * SeqHash.R + ord(_seq[i])) % SeqHash.Q
+            h = (h * SeqHash.R + ord(seq[i])) % SeqHash.Q
         return h
 
     def __hash__(self):
@@ -70,10 +70,11 @@ class SeqNode(object):
         return (self.h << 8) ^ hash(self.seq_record.name)
 
     def __eq__(self, other):
+        assert self.h is not None, 'Hash h must be set before eq function can be used.'
         return (self.h, self.seq_record.name) == (other.h, other.seq_record.name)
 
     def __repr__(self):
-        return '{}'.format(self.seq_record.name)
+        return self.seq_record.name
 
 
 class SeqJoinEdge(object):
@@ -112,27 +113,28 @@ class SeqPrefixHashMap(object):
 
     SeqPrefixHashMap uses a multiple pattern Rabin-Karp string searching algorithm by first
     building up a 2-level dictionary (key: subsequence length, subsequence hash, value:
-    list of SeqNodes that have matching prefix length and hash). node_to_edges() next goes through
+    list of SeqNodes that have matching prefix length and hash). node_to_edges() goes through
     all the sequences checking all possible subsequence suffixes that can match the prefix using
-    the map.
+    the dictionary.
     """
-    def __init__(self, _seq_records):
+    def __init__(self, seq_records):
         """
         Builds up the SeqPrefixHashMap from an iterable of SeqRecords.
-        :param _seq_records: Iterable of SeqRecords
+
+        :param seq_records: Iterable of SeqRecords
         .. complexity:: Time: O(N*l)=O(n), Space: O(N*l)=O(n), where N is number of SeqRecords,
             l is the average length of fragments, and n is the input size (N*l, effectively)
         """
         self.length_to_hash_to_seqs_map = defaultdict(self.list_generating_defaultdict)
         self.nodes = []
-        for s_rec in _seq_records:
+        for s_rec in seq_records:
             node = SeqNode(s_rec)
-            _seq = s_rec.seq
-            min_join_length = (len(_seq) + 1) / 2
+            seq = s_rec.seq
+            min_join_length = (len(seq) + 1) / 2
             h = node.seq_hash(length=min_join_length)
             self.length_to_hash_to_seqs_map[min_join_length][h].append(node)
-            for l in xrange(min_join_length + 1, len(_seq) + 1):
-                h = (h * SeqHash.R + ord(_seq[l - 1])) % SeqHash.Q
+            for l in xrange(min_join_length + 1, len(seq) + 1):
+                h = (h * SeqHash.R + ord(seq[l - 1])) % SeqHash.Q
                 self.length_to_hash_to_seqs_map[l][h].append(node)
             node.h = h
             self.nodes.append(node)
@@ -143,15 +145,15 @@ class SeqPrefixHashMap(object):
 
     def node_to_edges(self):
         """
-        Returns the mapping of nodes to SeqJoinEdges using the internal SeqPrefixHashMap.
+        Returns the mapping of nodes to SeqJoinEdges using the internal length-prefix dictionary.
 
         For each SeqNode, calculate a subsequence hash for each possible suffix length from
         min_join_length to length and see if there are candidate SeqNodes with matching prefix
         length and hash in the map. For each candidate explicitly check to make sure the suffix
         matches the candidate's prefix character by character (Las Vegas variant of Rabin-Karp).
-        A fragment joining with itself is explicitly not allowed.
+        A fragment joining with itself is explicitly prohibited.
 
-        :return: Dictionary of nodes to SeqJoinEdges.
+        :return: Dictionary of SeqNodes to SeqJoinEdges.
         .. complexity:: Typical Time: O(N*l)=O(n), Space: O(N*l)=O(n), where N is number of
             SeqRecords, l is the average length of fragments, and n is the input size (N*l,
             effectively).
@@ -159,12 +161,12 @@ class SeqPrefixHashMap(object):
             collide during building of SeqPrefixHashMap. The additional N term comes from having
             to check each sequence, the additional l term comes from the character by character
             check.
-        .. note:: Self joining is explicitly not allowed.
+        .. note:: Self joining is explicitly prohibited.
         """
         node_to_edges = defaultdict(list)
         for n in self.nodes:
-            seq = n.seq_record.seq
-            idx = len(seq) - (len(seq) + 1) / 2
+            seq = n.get_seq()
+            idx = len(seq) / 2
             h = n.seq_hash(idx)
             while True:
                 length = len(seq) - idx
@@ -172,7 +174,7 @@ class SeqPrefixHashMap(object):
                     for candidate_node in self.length_to_hash_to_seqs_map[length][h]:
                         if candidate_node == n:
                             continue
-                        if seq[idx:] == candidate_node.seq()[:length]:
+                        if seq[idx:] == candidate_node.get_seq()[:length]:
                             node_to_edges[n].append(SeqJoinEdge(n, idx, candidate_node))
                 idx -= 1
                 if idx < 0:

@@ -3,7 +3,7 @@ import unittest
 
 from Bio import SeqIO
 
-import sequence_joiner as sj
+import contig_sequence as sj
 
 
 class BaseSeqJoinGraphTestCase(unittest.TestCase):
